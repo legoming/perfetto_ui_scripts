@@ -13,11 +13,13 @@
 (function () {
   'use strict';
 
+  // 延迟初始化，等待 Perfetto UI 完成首屏渲染后再注入按钮和监控器。
   setTimeout(() => {
     createFloatingButton();
     startButtonMonitor();
   }, 1000);
 
+  // 监听页面 DOM 变化并周期兜底，避免按钮被页面重绘后消失。
   function startButtonMonitor() {
     const observer = new MutationObserver(() => {
       ensureButtonExists();
@@ -26,6 +28,7 @@
     setInterval(ensureButtonExists, 2000);
   }
 
+  // 检查悬浮按钮是否存在，不存在则重建。
   function ensureButtonExists() {
     const existingButton = document.getElementById('perfetto-auto-pin-btn');
     if (!existingButton) {
@@ -34,6 +37,7 @@
     }
   }
 
+  // 创建固定在页面右下角的 Pin 悬浮按钮，并绑定交互事件。
   function createFloatingButton() {
     if (document.getElementById('perfetto-auto-pin-btn')) return;
 
@@ -92,6 +96,7 @@
     console.log('✅ Perfetto Auto Pin 按钮已创建（位于原按钮上方）');
   }
 
+  // 弹出输入对话框：支持 app / sf / ss 多进程输入。
   function showInputDialog() {
     const dialog = document.createElement('div');
     dialog.id = 'perfetto-input-dialog';
@@ -186,6 +191,7 @@
     cancelBtn.addEventListener('click', () => dialog.remove());
   }
 
+  // 解析用户输入，拆分为 app 列表、surfaceflinger、system_server 三类。
   function parseProcessInput(input) {
     const processes = { apps: [], surfaceflinger: null, system_server: null };
     const parts = input.split(';').map(p => p.trim()).filter(p => p);
@@ -199,6 +205,7 @@
     return processes;
   }
 
+  // 统一构建线程匹配选项，减少调用处重复参数拼装。
   function createMatchOptions(pattern, enforceProcessName = false) {
     return {
       useChip: pattern.useChip || false,
@@ -209,6 +216,7 @@
     };
   }
 
+  // 主流程：展开轨道、构建规则、批量查找并 pin 线程。
   async function autoPinTracks(inputString) {
     console.log(`\n${'='.repeat(60)}`);
     console.log(`🔍 开始自动 Pin 线程`);
@@ -218,11 +226,13 @@
     const processes = parseProcessInput(inputString);
     console.log('解析结果:', processes);
 
+    // 优先全量展开轨道，提升后续查找命中率。
     await expandAllTracks();
 
     const sfIdentifier = processes.surfaceflinger || "surfaceflinger";
     const ssIdentifier = processes.system_server || "system_server";
 
+    // 先解析每个 app 的完整包名（若可获得），用于 BufferTX/QueuedBuffer 精准过滤。
     const appPackageNames = [];
     for (const appId of processes.apps) {
       const appProcessTrack = findProcessTrack(appId);
@@ -250,6 +260,7 @@
     let errorDetails = [];
     const processCache = new Map();
 
+    // 对每个 app 执行一轮规则化 pin。
     for (let appIndex = 0; appIndex < appPackageNames.length; appIndex++) {
       const { id: appIdentifier, packageName: appPackageName, hasPackageName } = appPackageNames[appIndex];
 
@@ -257,6 +268,7 @@
       console.log(`📱 处理 App ${appIndex + 1}/${appPackageNames.length}: ${appIdentifier}`);
       console.log(`${'='.repeat(60)}\n`);
 
+      // App 侧关键线程规则（含系统关联线程）。
       const appTrackPatterns = [
         { process: ssIdentifier, thread: "InputDispatcher", desc: "input dispatcher", pinAll: true },
         { process: sfIdentifier, thread: "VSYNC-app", desc: `[App ${appIndex + 1}] surfaceflinger / VSYNC-app` },
@@ -270,6 +282,7 @@
         { process: appIdentifier, thread: "BLAST Consumer", desc: `[App ${appIndex + 1}] app / BLAST Consumer`, pinAll: true },
       ];
 
+      // QueuedBuffer 按“包名可用/不可用”选择精确匹配或全量匹配策略。
       if (hasPackageName) {
         appTrackPatterns.push({
           process: appIdentifier,
@@ -288,6 +301,7 @@
         });
       }
 
+      // BufferTX 同样按包名可用性切换匹配策略。
       if (hasPackageName) {
         appTrackPatterns.push({
           process: sfIdentifier,
@@ -317,6 +331,7 @@
     console.log(`🔧 处理 SurfaceFlinger 和 System Server`);
     console.log(`${'='.repeat(60)}\n`);
 
+    // 最后处理 SurfaceFlinger / SystemServer 全局线程。
     const systemTrackPatterns = [
       { process: sfIdentifier, thread: "VSYNC-sf", desc: "surfaceflinger / VSYNC-sf" },
       { process: sfIdentifier, thread: "Expected Timeline", desc: "surfaceflinger / Expected Timeline" },
@@ -359,6 +374,7 @@
     showResultNotification(pinnedCount, notFoundTracks.length);
   }
 
+  // 按给定 pattern 执行批量 pin，返回成功数与失败明细。
   async function pinTracksByPatterns(trackPatterns, processCache) {
     let pinnedCount = 0;
     let notFoundTracks = [];
@@ -497,6 +513,7 @@
     return { pinnedCount, notFoundTracks, errorDetails };
   }
 
+  // 深度查询：支持穿透 Shadow DOM 收集元素。
   function collectElementsDeep(root, selector, result = []) {
     if (!root) return result;
 
@@ -509,6 +526,7 @@
     return result;
   }
 
+  // 通过标题文本定位“进程摘要轨道”。
   function findProcessTrack(processName) {
     const allTracks = collectElementsDeep(document, '.pf-track');
     const needle = (processName || '').toLowerCase();
@@ -524,6 +542,7 @@
     return null;
   }
 
+  // 展开进程轨道（若当前处于折叠态）。
   function expandProcessTrack(processTrack) {
     const expandButton = processTrack.querySelector('.pf-track__collapse-button');
     if (expandButton) {
@@ -537,6 +556,7 @@
     return false;
   }
 
+  // 点击 Perfetto 的 “Expand all” 按钮。
   async function expandAllTracks() {
     const expandAllButton = collectElementsDeep(document, 'button[title="Expand all"]')[0];
     if (!expandAllButton) {
@@ -549,10 +569,12 @@
     await sleep(300);
   }
 
+  // 归一化文本，弱化符号差异带来的匹配误差。
   function normalizeForMatch(text) {
     return (text || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
   }
 
+  // 宽松匹配：先直接包含，再归一化后包含。
   function isLooselyMatched(text, keyword) {
     const source = (text || '').toLowerCase();
     const target = (keyword || '').toLowerCase();
@@ -564,6 +586,7 @@
     return targetNorm.length > 0 && sourceNorm.includes(targetNorm);
   }
 
+  // 聚合 track 可检索文本（标题、属性、正文）。
   function getTrackSearchText(track) {
     if (!track) return '';
     const titleEl = collectElementsDeep(track, '.pf-track__title-popup')[0];
@@ -574,6 +597,7 @@
     return `${titleText} ${refText} ${dataName} ${fallbackText}`.trim();
   }
 
+  // 收集某进程 summary 后面的同层子轨道，直到下一个 summary。
   function collectSiblingChildTracks(processTrack) {
     if (!processTrack || !processTrack.parentElement) return [];
 
@@ -591,6 +615,7 @@
     return siblings;
   }
 
+  // 在线程范围内查找目标线程，逐级回退：sibling -> local -> global。
   function findThreadTracks(processTrack, threadName, options = {}) {
     const { useChip = false, partial = false, matchAppName = null, processName = '' } = options;
 
@@ -627,6 +652,7 @@
     });
   }
 
+  // 对候选轨道执行匹配判定，支持 chip/文本/部分匹配等策略。
   function matchThreadTracks(childTracks, threadName, options = {}) {
     const {
       useChip = false,
@@ -691,10 +717,12 @@
     return matchedTracks;
   }
 
+  // 简单 sleep 工具，用于等待 UI 状态更新。
   function sleep(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
+  // 在 track 中查找 pin 控件，并推断当前是否已 pinned。
   function findPinControl(trackNode) {
     if (!trackNode) return { button: null, isPinned: false };
 
@@ -741,6 +769,7 @@
     return { button: null, isPinned: false };
   }
 
+  // 对轨道触发右键菜单事件，作为 pin 按钮找不到时的兜底路径。
   function openTrackContextMenu(trackNode) {
     const eventTarget =
       collectElementsDeep(trackNode, '.pf-track__header')[0] ||
@@ -760,6 +789,7 @@
     return eventTarget.dispatchEvent(event);
   }
 
+  // 通过上下文菜单执行 “Pin to top”。
   async function tryPinViaContextMenu(trackNode) {
     openTrackContextMenu(trackNode);
     await sleep(60);
@@ -779,6 +809,7 @@
     return false;
   }
 
+  // 对单个轨道执行 pin：优先按钮，失败后回退右键菜单。
   async function pinTrack(trackNode) {
     if (!trackNode) return false;
 
@@ -816,6 +847,7 @@
     return await tryPinViaContextMenu(trackNode);
   }
 
+  // 显示执行结果通知。
   function showResultNotification(pinnedCount, failedCount) {
     const notification = document.createElement('div');
     notification.style.cssText = `
