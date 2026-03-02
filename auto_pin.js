@@ -620,6 +620,22 @@
             || collectElementsDeep(trackNode, '.pf-track__actions')[0]
             || trackNode;
 
+        const pinButtonByTitle = collectElementsDeep(trackButtons, 'button[title="Pin to top"]')[0];
+        if (pinButtonByTitle) {
+            return { button: pinButtonByTitle, isPinned: false };
+        }
+
+        const iconPinButton = collectElementsDeep(trackButtons, 'button').find((btn) => {
+            const icon = collectElementsDeep(btn, 'i.pf-icon, .pf-icon')[0];
+            const iconText = (icon && icon.textContent || '').toLowerCase();
+            return iconText.includes('push_pin');
+        });
+        if (iconPinButton) {
+            const icon = collectElementsDeep(iconPinButton, 'i.pf-icon, .pf-icon')[0];
+            const iconClass = (icon && icon.className || '').toLowerCase();
+            return { button: iconPinButton, isPinned: iconClass.includes('pf-filled') };
+        }
+
         const directButtons = collectElementsDeep(trackButtons, 'button');
         const ariaButtons = collectElementsDeep(trackButtons, '[aria-label*="pin" i], [title*="pin" i], [aria-label*="keep" i], [title*="keep" i]');
         const candidates = [...new Set([...directButtons, ...ariaButtons])];
@@ -722,7 +738,7 @@
             header.dispatchEvent(new MouseEvent(eventName, { bubbles: true, cancelable: true, view: window }));
         }
 
-        const pinScopes = [trackNode, header, document];
+        const pinScopes = [trackNode, header];
         for (const scope of pinScopes) {
             const pinControl = findPinControl(scope);
             if (!pinControl.button) continue;
