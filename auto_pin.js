@@ -616,8 +616,13 @@
     function findPinControl(trackNode) {
         if (!trackNode) return { button: null, isPinned: false };
 
-        const trackButtons = collectElementsDeep(trackNode, '.pf-track__buttons')[0] || trackNode;
-        const candidates = collectElementsDeep(trackButtons, 'button');
+        const trackButtons = collectElementsDeep(trackNode, '.pf-track__buttons')[0]
+            || collectElementsDeep(trackNode, '.pf-track__actions')[0]
+            || trackNode;
+
+        const directButtons = collectElementsDeep(trackButtons, 'button');
+        const ariaButtons = collectElementsDeep(trackButtons, '[aria-label*="pin" i], [title*="pin" i], [aria-label*="keep" i], [title*="keep" i]');
+        const candidates = [...new Set([...directButtons, ...ariaButtons])];
 
         for (const btn of candidates) {
             const buttonText = ((btn.textContent || '') + ' ' + (btn.title || '') + ' ' + (btn.getAttribute('aria-label') || '')).toLowerCase();
@@ -629,7 +634,8 @@
             if (!isPinLike) continue;
 
             const isPinned = buttonText.includes('unpin') || iconClass.includes('pf-filled');
-            return { button: btn, isPinned };
+            const clickable = btn.closest('button, [role="button"]') || btn;
+            return { button: clickable, isPinned };
         }
 
         return { button: null, isPinned: false };
@@ -691,14 +697,6 @@
         }
 
         if (matchedTracks.length > 0) {
-            const actionableTracks = matchedTracks.filter(track => !!findPinControl(track).button);
-            if (actionableTracks.length > 0) {
-                if (actionableTracks.length !== matchedTracks.length) {
-                    console.log(`  ℹ️  已过滤无 pin 按钮的候选 track: ${matchedTracks.length} -> ${actionableTracks.length}`);
-                }
-                matchedTracks.length = 0;
-                matchedTracks.push(...actionableTracks);
-            }
             console.log(`  ✅ 找到 ${matchedTracks.length} 个匹配的线程 track`);
         } else {
             console.log(`  ❌ 未找到线程 track: ${threadName}`);
@@ -710,6 +708,10 @@
     function pinTrack(trackNode) {
         if (!trackNode) return false;
 
+        if (trackNode.scrollIntoView) {
+            trackNode.scrollIntoView({ block: 'center', inline: 'nearest' });
+        }
+
         const revealEvents = ['mouseenter', 'mouseover', 'mousemove'];
         for (const eventName of revealEvents) {
             trackNode.dispatchEvent(new MouseEvent(eventName, { bubbles: true, cancelable: true, view: window }));
@@ -720,7 +722,7 @@
             header.dispatchEvent(new MouseEvent(eventName, { bubbles: true, cancelable: true, view: window }));
         }
 
-        const pinScopes = [trackNode, header];
+        const pinScopes = [trackNode, header, document];
         for (const scope of pinScopes) {
             const pinControl = findPinControl(scope);
             if (!pinControl.button) continue;
