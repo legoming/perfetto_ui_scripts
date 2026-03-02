@@ -591,6 +591,23 @@
     return siblings;
   }
 
+  function collectFollowingChildTracks(processTrack) {
+    if (!processTrack) return [];
+
+    const allTracks = collectElementsDeep(document, '.pf-track');
+    const startIndex = allTracks.indexOf(processTrack);
+    if (startIndex < 0) return [];
+
+    const children = [];
+    for (let i = startIndex + 1; i < allTracks.length; i++) {
+      const track = allTracks[i];
+      const isSummaryTrack = !!collectElementsDeep(track, '.pf-track__header--summary')[0];
+      if (isSummaryTrack) break;
+      children.push(track);
+    }
+    return children;
+  }
+
   function findThreadTracks(processTrack, threadName, options = {}) {
     const { useChip = false, partial = false, matchAppName = null, processName = '' } = options;
 
@@ -598,6 +615,15 @@
     if (siblingFallbackTracks.length > 0) {
       console.log(`  ℹ️  使用 sibling 回退，发现 ${siblingFallbackTracks.length} 个候选子 track`);
       return matchThreadTracks(siblingFallbackTracks, threadName, {
+        useChip, partial, matchAppName, processName,
+        enforceProcessName: false
+      });
+    }
+
+    const followingFallbackTracks = collectFollowingChildTracks(processTrack);
+    if (followingFallbackTracks.length > 0) {
+      console.log(`  ℹ️  使用顺序回退，发现 ${followingFallbackTracks.length} 个候选子 track`);
+      return matchThreadTracks(followingFallbackTracks, threadName, {
         useChip, partial, matchAppName, processName,
         enforceProcessName: false
       });
