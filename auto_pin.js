@@ -636,8 +636,7 @@
 
             const globalFallbackTracks = collectElementsDeep(document, '.pf-track').filter((track) => {
                 if (track === processTrack) return false;
-                const titleEl = collectElementsDeep(track, '.pf-track__title-popup')[0];
-                const text = ((titleEl && titleEl.textContent) || track.textContent || '');
+                const text = getTrackSearchText(track);
                 return isLooselyMatched(text, processName);
             });
 
