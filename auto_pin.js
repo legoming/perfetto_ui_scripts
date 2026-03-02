@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Perfetto UI Auto Pin Threads
 // @namespace    http://tampermonkey.net/
-// @version      1.27
+// @version      1.28
 // @description  在 Perfetto UI 中自动批量 pin 住 SurfaceFlinger 和 App 的关键渲染线程（支持多进程）
 // @author       Jet (Cloudrise)
 // @match        https://ui.perfetto.dev/*
@@ -207,6 +207,8 @@
     const processes = parseProcessInput(inputString);
     console.log('解析结果:', processes);
 
+    await expandAllTracks();
+
     const sfIdentifier = processes.surfaceflinger || "surfaceflinger";
     const ssIdentifier = processes.system_server || "system_server";
 
@@ -255,8 +257,25 @@
         { process: appIdentifier, thread: "RenderThread", desc: `[App ${appIndex + 1}] app / RenderThread`, pinAll: true, maxCount: 2 },
         { process: appIdentifier, thread: "GPU completion", desc: `[App ${appIndex + 1}] app / GPU completion`, pinAll: true },
         { process: appIdentifier, thread: "BLAST Consumer", desc: `[App ${appIndex + 1}] app / BLAST Consumer`, pinAll: true },
-        { process: appIdentifier, thread: "QueuedBuffer", desc: `[App ${appIndex + 1}] app / QueuedBuffer`, pinAll: true },
       ];
+
+      if (hasPackageName) {
+        appTrackPatterns.push({
+          process: appIdentifier,
+          thread: "QueuedBuffer",
+          desc: `[App ${appIndex + 1}] app / QueuedBuffer`,
+          partial: true,
+          matchAppName: appPackageName,
+          pinAll: true
+        });
+      } else {
+        appTrackPatterns.push({
+          process: appIdentifier,
+          thread: "QueuedBuffer",
+          desc: `[App ${appIndex + 1}] app / QueuedBuffer (所有)`,
+          pinAll: true
+        });
+      }
 
       if (hasPackageName) {
         appTrackPatterns.push({
@@ -523,6 +542,18 @@
       }
     }
     return false;
+  }
+
+  async function expandAllTracks() {
+    const expandAllButton = collectElementsDeep(document, 'button[title="Expand all"]')[0];
+    if (!expandAllButton) {
+      console.log('⚠️ 未找到 Expand all 按钮，跳过全量展开');
+      return;
+    }
+
+    console.log('📂 点击 Expand all 展开所有 track');
+    expandAllButton.click();
+    await sleep(300);
   }
 
   function normalizeForMatch(text) {
