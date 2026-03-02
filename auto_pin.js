@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Perfetto UI Auto Pin Threads
 // @namespace    http://tampermonkey.net/
-// @version      1.20
+// @version      1.21
 // @description  在 Perfetto UI 中自动批量 pin 住 SurfaceFlinger 和 App 的关键渲染线程（支持多进程）
 // @author       Jet (Cloudrise)
 // @match        https://ui.perfetto.dev/*
@@ -488,15 +488,30 @@
         return targetNorm.length > 0 && sourceNorm.includes(targetNorm);
     }
 
+    function getTrackChildrenContainer(processTrack) {
+        const containerSelectors = [
+            '.pf-track__children',
+            '.pf-track-group__children',
+            '[data-track-children]'
+        ];
+
+        for (const selector of containerSelectors) {
+            let container = processTrack.querySelector(selector);
+            if (!container && processTrack.shadowRoot) {
+                container = processTrack.shadowRoot.querySelector(selector);
+            }
+            if (!container) {
+                container = collectElementsDeep(processTrack, selector)[0] || null;
+            }
+            if (container) return container;
+        }
+
+        return null;
+    }
+
     function findThreadTracks(processTrack, threadName, options = {}) {
         const { useChip = false, partial = false, matchAppName = null, processName = '' } = options;
-        let childrenContainer = processTrack.querySelector('.pf-track__children');
-        if (!childrenContainer && processTrack.shadowRoot) {
-            childrenContainer = processTrack.shadowRoot.querySelector('.pf-track__children');
-        }
-        if (!childrenContainer) {
-            childrenContainer = collectElementsDeep(processTrack, '.pf-track__children')[0] || null;
-        }
+        const childrenContainer = getTrackChildrenContainer(processTrack);
 
         if (!childrenContainer) {
             console.log(`  ⚠️  未找到 pf-track__children 容器`);
@@ -523,6 +538,34 @@
         }
 
         return matchThreadTracks(childTracks, threadName, options);
+    }
+
+    function findPinButton(trackNode) {
+        if (!trackNode) return null;
+
+        const iconSelectors = [
+            'i',
+            '.material-icons',
+            '.material-symbols-outlined'
+        ];
+
+        const candidates = collectElementsDeep(trackNode, 'button');
+        for (const btn of candidates) {
+            const text = (btn.textContent || '').toLowerCase();
+            if (text.includes('push_pin') || text.includes('pin')) {
+                return btn;
+            }
+
+            for (const selector of iconSelectors) {
+                const icon = btn.querySelector(selector) || collectElementsDeep(btn, selector)[0];
+                const iconText = icon ? (icon.textContent || '').toLowerCase() : '';
+                if (iconText.includes('push_pin') || iconText.includes('pin')) {
+                    return btn;
+                }
+            }
+        }
+
+        return null;
     }
 
     function matchThreadTracks(childTracks, threadName, options = {}) {
@@ -581,6 +624,14 @@
         }
 
         if (matchedTracks.length > 0) {
+            const actionableTracks = matchedTracks.filter(track => !!findPinButton(track));
+            if (actionableTracks.length > 0) {
+                if (actionableTracks.length !== matchedTracks.length) {
+                    console.log(`  ℹ️  已过滤无 pin 按钮的候选 track: ${matchedTracks.length} -> ${actionableTracks.length}`);
+                }
+                matchedTracks.length = 0;
+                matchedTracks.push(...actionableTracks);
+            }
             console.log(`  ✅ 找到 ${matchedTracks.length} 个匹配的线程 track`);
         } else {
             console.log(`  ❌ 未找到线程 track: ${threadName}`);
@@ -591,13 +642,10 @@
 
     function pinTrack(trackNode) {
         if (!trackNode) return false;
-        const buttons = collectElementsDeep(trackNode, 'button');
-        for (const btn of buttons) {
-            const icon = btn.querySelector('i') || collectElementsDeep(btn, 'i')[0];
-            if (icon && icon.textContent.includes('push_pin')) {
-                btn.click();
-                return true;
-            }
+        const pinButton = findPinButton(trackNode);
+        if (pinButton) {
+            pinButton.click();
+            return true;
         }
         return false;
     }
