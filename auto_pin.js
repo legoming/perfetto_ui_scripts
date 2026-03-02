@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Perfetto UI Auto Pin Threads
 // @namespace    http://tampermonkey.net/
-// @version      1.26-minpatch
+// @version      1.27
 // @description  在 Perfetto UI 中自动批量 pin 住 SurfaceFlinger 和 App 的关键渲染线程（支持多进程）
 // @author       Jet (Cloudrise)
 // @match        https://ui.perfetto.dev/*
@@ -251,7 +251,7 @@
         { process: appIdentifier, thread: "Actual Timeline", desc: `[App ${appIndex + 1}] app / Actual Timeline` },
         { process: appIdentifier, thread: "aq:pending", desc: `[App ${appIndex + 1}] app / aq` },
         { process: appIdentifier, thread: "deliverInputEvent", desc: `[App ${appIndex + 1}] app / deliverInputEvent` },
-        { process: appIdentifier, thread: "main", desc: `[App ${appIndex + 1}] app / main thread`, useChip: true, pinAll: true },
+        { process: appIdentifier, thread: "main", desc: `[App ${appIndex + 1}] app / main thread`, useChip: false, pinAll: true },
         { process: appIdentifier, thread: "RenderThread", desc: `[App ${appIndex + 1}] app / RenderThread`, pinAll: true, maxCount: 2 },
         { process: appIdentifier, thread: "GPU completion", desc: `[App ${appIndex + 1}] app / GPU completion`, pinAll: true },
         { process: appIdentifier, thread: "BLAST Consumer", desc: `[App ${appIndex + 1}] app / BLAST Consumer`, pinAll: true },
@@ -291,11 +291,11 @@
       { process: sfIdentifier, thread: "VSYNC-sf", desc: "surfaceflinger / VSYNC-sf" },
       { process: sfIdentifier, thread: "Expected Timeline", desc: "surfaceflinger / Expected Timeline" },
       { process: sfIdentifier, thread: "Actual Timeline", desc: "surfaceflinger / Actual Timeline" },
-      { process: sfIdentifier, thread: "main", desc: "surfaceflinger / main thread", useChip: true, pinAll: true },
-      { process: sfIdentifier, thread: "GPU completion", desc: "surfaceflinger / GPU completion", useChip: true, pinAll: true },
-      { process: sfIdentifier, thread: "hasClientComposition", desc: "surfaceflinger / hasClientComposition", useChip: true, pinAll: true },
-      { process: sfIdentifier, thread: "RenderEngine", desc: "surfaceflinger / RenderEngine", useChip: true, pinAll: true },
-      { process: sfIdentifier, thread: "RE Completion", desc: "surfaceflinger / RE Completion", useChip: true, pinAll: true },
+      { process: sfIdentifier, thread: "main", desc: "surfaceflinger / main thread", useChip: false, pinAll: true },
+      { process: sfIdentifier, thread: "GPU completion", desc: "surfaceflinger / GPU completion", useChip: false, pinAll: true },
+      { process: sfIdentifier, thread: "hasClientComposition", desc: "surfaceflinger / hasClientComposition", useChip: false, pinAll: true },
+      { process: sfIdentifier, thread: "RenderEngine", desc: "surfaceflinger / RenderEngine", useChip: false, pinAll: true },
+      { process: sfIdentifier, thread: "RE Completion", desc: "surfaceflinger / RE Completion", useChip: false, pinAll: true },
       { process: sfIdentifier, thread: "FramebufferSurface", desc: "surfaceflinger / FramebufferSurface" },
       { process: ssIdentifier, thread: "Focused app", desc: "focused app" },
     ];
