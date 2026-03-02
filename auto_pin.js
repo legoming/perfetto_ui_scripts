@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Perfetto UI Auto Pin Threads
 // @namespace    http://tampermonkey.net/
-// @version      1.24
+// @version      1.25
 // @description  在 Perfetto UI 中自动批量 pin 住 SurfaceFlinger 和 App 的关键渲染线程（支持多进程）
 // @author       Jet (Cloudrise)
 // @match        https://ui.perfetto.dev/*
@@ -465,7 +465,7 @@
                         return pinControl.button && !pinControl.isPinned;
                     }) || liveThreadTracks[0];
 
-                    const success = pinTrack(targetTrack);
+                    const success = await pinTrack(targetTrack);
                     if (success) {
                         successCount++;
                         pinnedCount++;
@@ -491,7 +491,7 @@
 
                 if (successCount === 0) notFoundTracks.push(pattern.desc);
             } else {
-                const success = pinTrack(threadTracks[0]);
+                const success = await pinTrack(threadTracks[0]);
                 if (success) {
                     pinnedCount++;
                     console.log(`  ✅ 成功 pin`);
@@ -672,9 +672,10 @@
             || collectElementsDeep(trackNode, '.pf-track__actions')[0]
             || trackNode;
 
-        const pinButtonByTitle = collectElementsDeep(trackButtons, 'button[title="Pin to top"]')[0];
+        const pinButtonByTitle = collectElementsDeep(trackButtons, 'button[title="Pin to top"], button[title="Unpin from top"]')[0];
         if (pinButtonByTitle) {
-            return { button: pinButtonByTitle, isPinned: false };
+            const title = (pinButtonByTitle.getAttribute('title') || '').toLowerCase();
+            return { button: pinButtonByTitle, isPinned: title.includes('unpin') };
         }
 
         const iconPinButton = collectElementsDeep(trackButtons, 'button').find((btn) => {
@@ -775,7 +776,54 @@
         return matchedTracks;
     }
 
-    function pinTrack(trackNode) {
+    function sleep(ms) {
+        return new Promise((resolve) => setTimeout(resolve, ms));
+    }
+
+    function openTrackContextMenu(trackNode) {
+        const eventTarget = collectElementsDeep(trackNode, '.pf-track__header')[0]
+            || collectElementsDeep(trackNode, '.pf-track__title-popup')[0]
+            || trackNode;
+
+        const event = new MouseEvent('contextmenu', {
+            bubbles: true,
+            cancelable: true,
+            view: window,
+            button: 2,
+            buttons: 2,
+            clientX: 24,
+            clientY: 24
+        });
+
+        return eventTarget.dispatchEvent(event);
+    }
+
+    async function tryPinViaContextMenu(trackNode) {
+        openTrackContextMenu(trackNode);
+        await sleep(60);
+
+        const pinMenuSelectors = [
+            '[role="menuitem"]',
+            '.pf-popup-menu-item',
+            '.pf-menu-item'
+        ];
+
+        for (const selector of pinMenuSelectors) {
+            const items = collectElementsDeep(document, selector);
+            const pinItem = items.find((item) => {
+                const text = (item.textContent || '').toLowerCase();
+                return text.includes('pin to top') || (text.includes('pin') && text.includes('top'));
+            });
+            if (pinItem) {
+                pinItem.click();
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    async function pinTrack(trackNode) {
         if (!trackNode) return false;
 
         if (trackNode.scrollIntoView) {
@@ -793,20 +841,24 @@
         }
 
         const pinScopes = [trackNode, header];
-        for (const scope of pinScopes) {
-            const pinControl = findPinControl(scope);
-            if (!pinControl.button) continue;
+        for (let attempt = 0; attempt < 3; attempt++) {
+            for (const scope of pinScopes) {
+                const pinControl = findPinControl(scope);
+                if (!pinControl.button) continue;
 
-            if (pinControl.isPinned) {
-                console.log('  ℹ️  线程已是 pinned 状态，跳过点击');
+                if (pinControl.isPinned) {
+                    console.log('  ℹ️  线程已是 pinned 状态，跳过点击');
+                    return true;
+                }
+
+                pinControl.button.click();
                 return true;
             }
 
-            pinControl.button.click();
-            return true;
+            await sleep(80);
         }
 
-        return false;
+        return await tryPinViaContextMenu(trackNode);
     }
 
     function showResultNotification(pinnedCount, failedCount) {
