@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Perfetto UI Auto Pin Threads
 // @namespace    http://tampermonkey.net/
-// @version      1.19
+// @version      1.20
 // @description  在 Perfetto UI 中自动批量 pin 住 SurfaceFlinger 和 App 的关键渲染线程（支持多进程）
 // @author       Jet (Cloudrise)
 // @match        https://ui.perfetto.dev/*
@@ -379,7 +379,8 @@
             const threadTracks = findThreadTracks(processTrack, pattern.thread, {
                 useChip: pattern.useChip || false,
                 partial: pattern.partial || false,
-                matchAppName: pattern.matchAppName || null
+                matchAppName: pattern.matchAppName || null,
+                processName: pattern.process || ''
             });
 
             if (threadTracks.length === 0) {
@@ -472,8 +473,23 @@
         return false;
     }
 
+    function normalizeForMatch(text) {
+        return (text || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+    }
+
+    function isLooselyMatched(text, keyword) {
+        const source = (text || '').toLowerCase();
+        const target = (keyword || '').toLowerCase();
+        if (!target) return false;
+        if (source.includes(target)) return true;
+
+        const sourceNorm = normalizeForMatch(source);
+        const targetNorm = normalizeForMatch(target);
+        return targetNorm.length > 0 && sourceNorm.includes(targetNorm);
+    }
+
     function findThreadTracks(processTrack, threadName, options = {}) {
-        const { useChip = false, partial = false, matchAppName = null } = options;
+        const { useChip = false, partial = false, matchAppName = null, processName = '' } = options;
         let childrenContainer = processTrack.querySelector('.pf-track__children');
         if (!childrenContainer && processTrack.shadowRoot) {
             childrenContainer = processTrack.shadowRoot.querySelector('.pf-track__children');
@@ -484,11 +500,20 @@
 
         if (!childrenContainer) {
             console.log(`  ⚠️  未找到 pf-track__children 容器`);
-            const fallbackChildTracks = collectElementsDeep(processTrack, '.pf-track')
+            const localFallbackTracks = collectElementsDeep(processTrack, '.pf-track')
                 .filter((track) => track !== processTrack);
+
+            const globalFallbackTracks = collectElementsDeep(document, '.pf-track').filter((track) => {
+                if (track === processTrack) return false;
+                const titleEl = collectElementsDeep(track, '.pf-track__title-popup')[0];
+                const text = ((titleEl && titleEl.textContent) || track.textContent || '');
+                return isLooselyMatched(text, processName);
+            });
+
+            const fallbackChildTracks = localFallbackTracks.length > 0 ? localFallbackTracks : globalFallbackTracks;
             if (fallbackChildTracks.length === 0) return [];
 
-            console.log(`  ℹ️  回退到深度查找，共发现 ${fallbackChildTracks.length} 个候选子 track`);
+            console.log(`  ℹ️  回退查找，共发现 ${fallbackChildTracks.length} 个候选子 track`);
             return matchThreadTracks(fallbackChildTracks, threadName, options);
         }
 
@@ -515,29 +540,29 @@
             let matched = false;
 
             if (useChip) {
-                const chipLabels = track.querySelectorAll('.pf-chip__label');
+                const chipLabels = collectElementsDeep(track, '.pf-chip__label');
                 for (const chip of chipLabels) {
                     const chipText = (chip.textContent || '').toLowerCase();
                     const normalizedThreadName = threadName.toLowerCase();
                     const isMainAlias = normalizedThreadName === 'main' && chipText.includes('main thread');
-                    if (isMainAlias || chipText.includes(normalizedThreadName)) {
+                    if (isMainAlias || isLooselyMatched(chipText, normalizedThreadName)) {
                         matched = true;
                         break;
                     }
                 }
             } else {
-                const titleEl = track.querySelector('.pf-track__title-popup');
-                if (titleEl) {
-                    const titleText = titleEl.textContent || '';
-                    const titleTextLower = titleText.toLowerCase();
-                    const threadNameLower = threadName.toLowerCase();
+                const titleEl = collectElementsDeep(track, '.pf-track__title-popup')[0];
+                const titleText = ((titleEl && titleEl.textContent) || track.textContent || '');
+                if (titleText) {
                     if (partial) {
-                        matched = titleTextLower.includes(threadNameLower);
+                        matched = isLooselyMatched(titleText, threadName);
                     } else {
-                        matched = titleTextLower === threadNameLower || titleTextLower.includes(threadNameLower);
+                        const titleTextLower = titleText.toLowerCase();
+                        const threadNameLower = threadName.toLowerCase();
+                        matched = titleTextLower === threadNameLower || isLooselyMatched(titleText, threadName);
                     }
                     if (matched && matchAppName) {
-                        matched = titleText.includes(matchAppName);
+                        matched = isLooselyMatched(titleText, matchAppName);
                         if (matched) {
                             console.log(`    🎯 匹配 BufferTX: ${titleText.substring(0, 100)}`);
                         } else {
@@ -566,9 +591,9 @@
 
     function pinTrack(trackNode) {
         if (!trackNode) return false;
-        const buttons = trackNode.querySelectorAll('button');
+        const buttons = collectElementsDeep(trackNode, 'button');
         for (const btn of buttons) {
-            const icon = btn.querySelector('i');
+            const icon = btn.querySelector('i') || collectElementsDeep(btn, 'i')[0];
             if (icon && icon.textContent.includes('push_pin')) {
                 btn.click();
                 return true;
