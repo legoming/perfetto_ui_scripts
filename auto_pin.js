@@ -654,7 +654,10 @@
             if (fallbackChildTracks.length === 0) return [];
 
             console.log(`  ℹ️  回退查找，共发现 ${fallbackChildTracks.length} 个候选子 track`);
-            return matchThreadTracks(fallbackChildTracks, threadName, options);
+            return matchThreadTracks(fallbackChildTracks, threadName, {
+                ...options,
+                enforceProcessName: fallbackChildTracks === globalFallbackTracks
+            });
         }
 
         let childTracks = Array.from(childrenContainer.querySelectorAll(':scope > .pf-track'));
@@ -662,7 +665,10 @@
             childTracks = collectElementsDeep(childrenContainer, '.pf-track');
         }
 
-        return matchThreadTracks(childTracks, threadName, options);
+        return matchThreadTracks(childTracks, threadName, {
+            ...options,
+            enforceProcessName: false
+        });
     }
 
     function findPinControl(trackNode) {
@@ -711,7 +717,13 @@
     }
 
     function matchThreadTracks(childTracks, threadName, options = {}) {
-        const { useChip = false, partial = false, matchAppName = null, processName = '' } = options;
+        const {
+            useChip = false,
+            partial = false,
+            matchAppName = null,
+            processName = '',
+            enforceProcessName = true
+        } = options;
         let searchDesc = `  🔎 在 ${childTracks.length} 个子 track 中查找线程: ${threadName}`;
         if (useChip) searchDesc += ' (从 chip 查找)';
         if (partial) searchDesc += ' (部分匹配)';
@@ -745,7 +757,7 @@
                         const threadNameLower = threadName.toLowerCase();
                         matched = titleTextLower === threadNameLower || isLooselyMatched(titleText, threadName);
                     }
-                    if (matched && processName) {
+                    if (matched && processName && enforceProcessName) {
                         matched = isLooselyMatched(titleText, processName);
                     }
                     if (matched && matchAppName) {
