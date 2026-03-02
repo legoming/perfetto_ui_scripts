@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Perfetto UI Auto Pin Threads
 // @namespace    http://tampermonkey.net/
-// @version      1.18
+// @version      1.19
 // @description  在 Perfetto UI 中自动批量 pin 住 SurfaceFlinger 和 App 的关键渲染线程（支持多进程）
 // @author       Jet (Cloudrise)
 // @match        https://ui.perfetto.dev/*
@@ -427,11 +427,31 @@
         return { pinnedCount, notFoundTracks };
     }
 
+    function collectElementsDeep(root, selector, result = []) {
+        if (!root) return result;
+
+        if (root.querySelectorAll) {
+            result.push(...root.querySelectorAll(selector));
+        }
+
+        const allNodes = root.querySelectorAll ? root.querySelectorAll('*') : [];
+        for (const node of allNodes) {
+            if (node.shadowRoot) {
+                collectElementsDeep(node.shadowRoot, selector, result);
+            }
+        }
+
+        return result;
+    }
+
     function findProcessTrack(processName) {
-        const allTracks = document.querySelectorAll('.pf-track');
+        const allTracks = collectElementsDeep(document, '.pf-track');
+        const needle = (processName || '').toLowerCase();
+
         for (const track of allTracks) {
-            const text = track.textContent || '';
-            if (text.includes(processName)) {
+            const titleEl = track.querySelector('.pf-track__title-popup');
+            const text = ((titleEl && titleEl.textContent) || track.textContent || '').toLowerCase();
+            if (text.includes(needle)) {
                 const header = track.querySelector('.pf-track__header--summary');
                 if (header) return track;
             }
@@ -454,14 +474,34 @@
 
     function findThreadTracks(processTrack, threadName, options = {}) {
         const { useChip = false, partial = false, matchAppName = null } = options;
-        const childrenContainer = processTrack.querySelector('.pf-track__children');
+        let childrenContainer = processTrack.querySelector('.pf-track__children');
+        if (!childrenContainer && processTrack.shadowRoot) {
+            childrenContainer = processTrack.shadowRoot.querySelector('.pf-track__children');
+        }
+        if (!childrenContainer) {
+            childrenContainer = collectElementsDeep(processTrack, '.pf-track__children')[0] || null;
+        }
 
         if (!childrenContainer) {
             console.log(`  ⚠️  未找到 pf-track__children 容器`);
-            return [];
+            const fallbackChildTracks = collectElementsDeep(processTrack, '.pf-track')
+                .filter((track) => track !== processTrack);
+            if (fallbackChildTracks.length === 0) return [];
+
+            console.log(`  ℹ️  回退到深度查找，共发现 ${fallbackChildTracks.length} 个候选子 track`);
+            return matchThreadTracks(fallbackChildTracks, threadName, options);
         }
 
-        const childTracks = childrenContainer.querySelectorAll(':scope > .pf-track');
+        let childTracks = Array.from(childrenContainer.querySelectorAll(':scope > .pf-track'));
+        if (childTracks.length === 0) {
+            childTracks = collectElementsDeep(childrenContainer, '.pf-track');
+        }
+
+        return matchThreadTracks(childTracks, threadName, options);
+    }
+
+    function matchThreadTracks(childTracks, threadName, options = {}) {
+        const { useChip = false, partial = false, matchAppName = null } = options;
         let searchDesc = `  🔎 在 ${childTracks.length} 个子 track 中查找线程: ${threadName}`;
         if (useChip) searchDesc += ' (从 chip 查找)';
         if (partial) searchDesc += ' (部分匹配)';
@@ -474,11 +514,13 @@
         for (const track of childTracks) {
             let matched = false;
 
-            if (useChip && threadName === 'main') {
+            if (useChip) {
                 const chipLabels = track.querySelectorAll('.pf-chip__label');
                 for (const chip of chipLabels) {
-                    const chipText = chip.textContent || '';
-                    if (chipText.includes('main thread')) {
+                    const chipText = (chip.textContent || '').toLowerCase();
+                    const normalizedThreadName = threadName.toLowerCase();
+                    const isMainAlias = normalizedThreadName === 'main' && chipText.includes('main thread');
+                    if (isMainAlias || chipText.includes(normalizedThreadName)) {
                         matched = true;
                         break;
                     }
@@ -487,10 +529,12 @@
                 const titleEl = track.querySelector('.pf-track__title-popup');
                 if (titleEl) {
                     const titleText = titleEl.textContent || '';
+                    const titleTextLower = titleText.toLowerCase();
+                    const threadNameLower = threadName.toLowerCase();
                     if (partial) {
-                        matched = titleText.includes(threadName);
+                        matched = titleTextLower.includes(threadNameLower);
                     } else {
-                        matched = titleText === threadName || titleText.includes(threadName);
+                        matched = titleTextLower === threadNameLower || titleTextLower.includes(threadNameLower);
                     }
                     if (matched && matchAppName) {
                         matched = titleText.includes(matchAppName);
