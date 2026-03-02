@@ -191,11 +191,22 @@
     const parts = input.split(';').map(p => p.trim()).filter(p => p);
 
     for (const part of parts) {
-      if (part.toLowerCase().startsWith('sf:')) processes.surfaceflinger = part.substring(3);
-      else if (part.toLowerCase().startsWith('ss:')) processes.system_server = part.substring(3);
+      const lowerPart = part.toLowerCase();
+      if (lowerPart.startsWith('sf:')) processes.surfaceflinger = part.substring(3);
+      else if (lowerPart.startsWith('ss:')) processes.system_server = part.substring(3);
       else processes.apps.push(part);
     }
     return processes;
+  }
+
+  function createMatchOptions(pattern, enforceProcessName = false) {
+    return {
+      useChip: pattern.useChip || false,
+      partial: pattern.partial || false,
+      matchAppName: pattern.matchAppName || null,
+      processName: pattern.process || '',
+      enforceProcessName
+    };
   }
 
   async function autoPinTracks(inputString) {
@@ -380,21 +391,10 @@
         threadTracks = matchThreadTracks(
           collectElementsDeep(document, '.pf-track'),
           pattern.thread,
-          {
-            useChip: pattern.useChip || false,
-            partial: pattern.partial || false,
-            matchAppName: pattern.matchAppName || null,
-            processName: pattern.process || '',
-            enforceProcessName: true
-          }
+          createMatchOptions(pattern, true)
         );
       } else {
-        threadTracks = findThreadTracks(processTrack, pattern.thread, {
-          useChip: pattern.useChip || false,
-          partial: pattern.partial || false,
-          matchAppName: pattern.matchAppName || null,
-          processName: pattern.process || ''
-        });
+        threadTracks = findThreadTracks(processTrack, pattern.thread, createMatchOptions(pattern));
       }
 
       if (threadTracks.length === 0) {
@@ -431,19 +431,12 @@
           }
 
           const liveThreadTracks = liveProcessTrack
-            ? findThreadTracks(liveProcessTrack, pattern.thread, {
-              useChip: pattern.useChip || false,
-              partial: pattern.partial || false,
-              matchAppName: pattern.matchAppName || null,
-              processName: pattern.process || ''
-            })
-            : matchThreadTracks(collectElementsDeep(document, '.pf-track'), pattern.thread, {
-              useChip: pattern.useChip || false,
-              partial: pattern.partial || false,
-              matchAppName: pattern.matchAppName || null,
-              processName: pattern.process || '',
-              enforceProcessName: true
-            });
+            ? findThreadTracks(liveProcessTrack, pattern.thread, createMatchOptions(pattern))
+            : matchThreadTracks(
+              collectElementsDeep(document, '.pf-track'),
+              pattern.thread,
+              createMatchOptions(pattern, true)
+            );
 
           if (liveThreadTracks.length === 0) {
             console.log('  ⚠️  动态重查后未找到线程，提前结束当前模式');
