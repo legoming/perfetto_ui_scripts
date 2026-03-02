@@ -385,24 +385,23 @@
                 }
             }
 
+            let threadTracks = [];
             if (!processTrack) {
-                notFoundTracks.push(pattern.desc);
-                console.log(`  ❌ 失败: 未找到进程`);
-                errorDetails.push({
-                    desc: pattern.desc,
-                    process: pattern.process,
-                    thread: pattern.thread,
-                    reason: '未找到进程 track（process summary track 不存在或名称不匹配）'
+                console.log(`  ⚠️  未找到进程，回退为全局线程搜索`);
+                threadTracks = matchThreadTracks(collectElementsDeep(document, '.pf-track'), pattern.thread, {
+                    useChip: pattern.useChip || false,
+                    partial: pattern.partial || false,
+                    matchAppName: pattern.matchAppName || null,
+                    processName: pattern.process || ''
                 });
-                continue;
+            } else {
+                threadTracks = findThreadTracks(processTrack, pattern.thread, {
+                    useChip: pattern.useChip || false,
+                    partial: pattern.partial || false,
+                    matchAppName: pattern.matchAppName || null,
+                    processName: pattern.process || ''
+                });
             }
-
-            const threadTracks = findThreadTracks(processTrack, pattern.thread, {
-                useChip: pattern.useChip || false,
-                partial: pattern.partial || false,
-                matchAppName: pattern.matchAppName || null,
-                processName: pattern.process || ''
-            });
 
             if (threadTracks.length === 0) {
                 notFoundTracks.push(pattern.desc);
@@ -533,6 +532,16 @@
         return targetNorm.length > 0 && sourceNorm.includes(targetNorm);
     }
 
+    function getTrackSearchText(track) {
+        if (!track) return '';
+        const titleEl = collectElementsDeep(track, '.pf-track__title-popup')[0];
+        const titleText = (titleEl && titleEl.textContent) || '';
+        const refText = track.getAttribute('ref') || '';
+        const dataName = track.getAttribute('data-name') || '';
+        const fallbackText = track.textContent || '';
+        return `${titleText} ${refText} ${dataName} ${fallbackText}`.trim();
+    }
+
     function getTrackChildrenContainer(processTrack) {
         const containerSelectors = [
             '.pf-track__children',
@@ -658,7 +667,7 @@
     }
 
     function matchThreadTracks(childTracks, threadName, options = {}) {
-        const { useChip = false, partial = false, matchAppName = null } = options;
+        const { useChip = false, partial = false, matchAppName = null, processName = '' } = options;
         let searchDesc = `  🔎 在 ${childTracks.length} 个子 track 中查找线程: ${threadName}`;
         if (useChip) searchDesc += ' (从 chip 查找)';
         if (partial) searchDesc += ' (部分匹配)';
@@ -683,8 +692,7 @@
                     }
                 }
             } else {
-                const titleEl = collectElementsDeep(track, '.pf-track__title-popup')[0];
-                const titleText = ((titleEl && titleEl.textContent) || track.textContent || '');
+                const titleText = getTrackSearchText(track);
                 if (titleText) {
                     if (partial) {
                         matched = isLooselyMatched(titleText, threadName);
@@ -692,6 +700,9 @@
                         const titleTextLower = titleText.toLowerCase();
                         const threadNameLower = threadName.toLowerCase();
                         matched = titleTextLower === threadNameLower || isLooselyMatched(titleText, threadName);
+                    }
+                    if (matched && processName) {
+                        matched = isLooselyMatched(titleText, processName);
                     }
                     if (matched && matchAppName) {
                         matched = isLooselyMatched(titleText, matchAppName);
