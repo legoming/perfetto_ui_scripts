@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Perfetto UI Auto Pin Threads
 // @namespace    http://tampermonkey.net/
-// @version      1.23
+// @version      1.24
 // @description  在 Perfetto UI 中自动批量 pin 住 SurfaceFlinger 和 App 的关键渲染线程（支持多进程）
 // @author       Jet (Cloudrise)
 // @match        https://ui.perfetto.dev/*
@@ -375,6 +375,11 @@
             console.log(`\n📍 [${i + 1}/${trackPatterns.length}] ${pattern.desc}`);
 
             let processTrack = processCache.get(pattern.process);
+            if (processTrack && !processTrack.isConnected) {
+                processCache.delete(pattern.process);
+                processTrack = null;
+            }
+
             if (!processTrack) {
                 processTrack = findProcessTrack(pattern.process);
                 if (processTrack) {
@@ -417,21 +422,59 @@
 
             if (pattern.pinAll) {
                 const maxCount = pattern.maxCount || threadTracks.length;
-                const targetTracks = threadTracks.slice(0, maxCount);
                 let successCount = 0;
 
-                for (let j = 0; j < targetTracks.length; j++) {
-                    console.log(`  [${j + 1}/${targetTracks.length}]`);
-                    const success = pinTrack(targetTracks[j]);
+                for (let j = 0; j < maxCount; j++) {
+                    console.log(`  [${j + 1}/${maxCount}]`);
+
+                    let liveProcessTrack = processCache.get(pattern.process);
+                    if (liveProcessTrack && !liveProcessTrack.isConnected) {
+                        processCache.delete(pattern.process);
+                        liveProcessTrack = null;
+                    }
+                    if (!liveProcessTrack) {
+                        liveProcessTrack = findProcessTrack(pattern.process);
+                        if (liveProcessTrack) {
+                            processCache.set(pattern.process, liveProcessTrack);
+                            expandProcessTrack(liveProcessTrack);
+                            await new Promise(resolve => setTimeout(resolve, 150));
+                        }
+                    }
+
+                    const liveThreadTracks = liveProcessTrack
+                        ? findThreadTracks(liveProcessTrack, pattern.thread, {
+                            useChip: pattern.useChip || false,
+                            partial: pattern.partial || false,
+                            matchAppName: pattern.matchAppName || null,
+                            processName: pattern.process || ''
+                        })
+                        : matchThreadTracks(collectElementsDeep(document, '.pf-track'), pattern.thread, {
+                            useChip: pattern.useChip || false,
+                            partial: pattern.partial || false,
+                            matchAppName: pattern.matchAppName || null,
+                            processName: pattern.process || ''
+                        });
+
+                    if (liveThreadTracks.length === 0) {
+                        console.log('  ⚠️  动态重查后未找到线程，提前结束当前模式');
+                        break;
+                    }
+
+                    const targetTrack = liveThreadTracks.find((track) => {
+                        const pinControl = findPinControl(track);
+                        return pinControl.button && !pinControl.isPinned;
+                    }) || liveThreadTracks[0];
+
+                    const success = pinTrack(targetTrack);
                     if (success) {
                         successCount++;
                         pinnedCount++;
-                        console.log(`  ✅ 成功 pin (${j + 1}/${targetTracks.length})`);
+                        console.log(`  ✅ 成功 pin (${j + 1}/${maxCount})`);
                         await new Promise(resolve => setTimeout(resolve, 200));
                     } else {
-                        console.log(`  ❌ 失败: 无法 pin (${j + 1}/${targetTracks.length})`);
-                        const titleEl = collectElementsDeep(targetTracks[j], '.pf-track__title-popup')[0];
-                        const trackText = ((titleEl && titleEl.textContent) || targetTracks[j].textContent || '').trim().slice(0, 180);
+                        console.log(`  ❌ 失败: 无法 pin (${j + 1}/${maxCount})`);
+                        const titleEl = collectElementsDeep(targetTrack, '.pf-track__title-popup')[0];
+                        const trackText = ((titleEl && titleEl.textContent) || targetTrack.textContent || '').trim().slice(0, 180);
                         errorDetails.push({
                             desc: pattern.desc,
                             process: pattern.process,
@@ -442,7 +485,7 @@
                     }
                 }
 
-                if (targetTracks.length < threadTracks.length) {
+                if (maxCount < threadTracks.length) {
                     console.log(`  ℹ️  已限制只 pin 前 ${maxCount} 个（共找到 ${threadTracks.length} 个）`);
                 }
 
