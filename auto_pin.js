@@ -266,6 +266,7 @@
 
         let pinnedCount = 0;
         let notFoundTracks = [];
+        let errorDetails = [];
         const processCache = new Map();
 
         // 第一阶段：Pin 所有 app 相关的线程
@@ -313,6 +314,7 @@
             const result = await pinTracksByPatterns(appTrackPatterns, processCache);
             pinnedCount += result.pinnedCount;
             notFoundTracks.push(...result.notFoundTracks);
+            errorDetails.push(...result.errorDetails);
         }
 
         // 第二阶段：Pin surfaceflinger 和 system_server 相关的线程
@@ -336,6 +338,7 @@
         const systemResult = await pinTracksByPatterns(systemTrackPatterns, processCache);
         pinnedCount += systemResult.pinnedCount;
         notFoundTracks.push(...systemResult.notFoundTracks);
+        errorDetails.push(...systemResult.errorDetails);
 
         console.log(`\n${'='.repeat(60)}`);
         console.log(`📊 执行完成`);
@@ -344,6 +347,17 @@
         if (notFoundTracks.length > 0) {
             console.log(`\n未能 pin 的 tracks:`);
             notFoundTracks.forEach(track => console.log(`  - ${track}`));
+        }
+        if (errorDetails.length > 0) {
+            console.log(`\n详细错误信息（无法 pin / 找不到 track）:`);
+            errorDetails.forEach((detail, index) => {
+                console.error(`  [${index + 1}] ${detail.desc}`);
+                console.error(`      reason: ${detail.reason}`);
+                console.error(`      process: ${detail.process || '(unknown)'}, thread: ${detail.thread || '(unknown)'}`);
+                if (detail.trackText) {
+                    console.error(`      track: ${detail.trackText}`);
+                }
+            });
         }
         console.log(`${'='.repeat(60)}\n`);
 
@@ -354,6 +368,7 @@
     async function pinTracksByPatterns(trackPatterns, processCache) {
         let pinnedCount = 0;
         let notFoundTracks = [];
+        let errorDetails = [];
 
         for (let i = 0; i < trackPatterns.length; i++) {
             const pattern = trackPatterns[i];
@@ -373,6 +388,12 @@
             if (!processTrack) {
                 notFoundTracks.push(pattern.desc);
                 console.log(`  ❌ 失败: 未找到进程`);
+                errorDetails.push({
+                    desc: pattern.desc,
+                    process: pattern.process,
+                    thread: pattern.thread,
+                    reason: '未找到进程 track（process summary track 不存在或名称不匹配）'
+                });
                 continue;
             }
 
@@ -386,6 +407,12 @@
             if (threadTracks.length === 0) {
                 notFoundTracks.push(pattern.desc);
                 console.log(`  ❌ 失败: 未找到线程`);
+                errorDetails.push({
+                    desc: pattern.desc,
+                    process: pattern.process,
+                    thread: pattern.thread,
+                    reason: '找到进程 track 但未匹配到线程 track'
+                });
                 continue;
             }
 
@@ -404,6 +431,15 @@
                         await new Promise(resolve => setTimeout(resolve, 200));
                     } else {
                         console.log(`  ❌ 失败: 无法 pin (${j + 1}/${targetTracks.length})`);
+                        const titleEl = collectElementsDeep(targetTracks[j], '.pf-track__title-popup')[0];
+                        const trackText = ((titleEl && titleEl.textContent) || targetTracks[j].textContent || '').trim().slice(0, 180);
+                        errorDetails.push({
+                            desc: pattern.desc,
+                            process: pattern.process,
+                            thread: pattern.thread,
+                            reason: '已找到线程 track，但未找到可点击的 pin 控件（按钮不可见/DOM 结构变化）',
+                            trackText
+                        });
                     }
                 }
 
@@ -421,11 +457,20 @@
                 } else {
                     notFoundTracks.push(pattern.desc);
                     console.log(`  ❌ 失败: 无法 pin`);
+                    const titleEl = collectElementsDeep(threadTracks[0], '.pf-track__title-popup')[0];
+                    const trackText = ((titleEl && titleEl.textContent) || threadTracks[0].textContent || '').trim().slice(0, 180);
+                    errorDetails.push({
+                        desc: pattern.desc,
+                        process: pattern.process,
+                        thread: pattern.thread,
+                        reason: '已找到线程 track，但未找到可点击的 pin 控件（按钮不可见/DOM 结构变化）',
+                        trackText
+                    });
                 }
             }
         }
 
-        return { pinnedCount, notFoundTracks };
+        return { pinnedCount, notFoundTracks, errorDetails };
     }
 
     function collectElementsDeep(root, selector, result = []) {
