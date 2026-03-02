@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Perfetto UI Auto Pin Threads
 // @namespace    http://tampermonkey.net/
-// @version      1.21
+// @version      1.23
 // @description  在 Perfetto UI 中自动批量 pin 住 SurfaceFlinger 和 App 的关键渲染线程（支持多进程）
 // @author       Jet (Cloudrise)
 // @match        https://ui.perfetto.dev/*
@@ -509,6 +509,24 @@
         return null;
     }
 
+    function collectSiblingChildTracks(processTrack) {
+        if (!processTrack || !processTrack.parentElement) return [];
+
+        const allTracks = Array.from(processTrack.parentElement.querySelectorAll(':scope > .pf-track'));
+        const startIndex = allTracks.indexOf(processTrack);
+        if (startIndex < 0) return [];
+
+        const siblings = [];
+        for (let i = startIndex + 1; i < allTracks.length; i++) {
+            const track = allTracks[i];
+            const isSummaryTrack = !!collectElementsDeep(track, '.pf-track__header--summary')[0];
+            if (isSummaryTrack) break;
+            siblings.push(track);
+        }
+
+        return siblings;
+    }
+
     function findThreadTracks(processTrack, threadName, options = {}) {
         const { useChip = false, partial = false, matchAppName = null, processName = '' } = options;
         const childrenContainer = getTrackChildrenContainer(processTrack);
@@ -517,6 +535,7 @@
             console.log(`  ⚠️  未找到 pf-track__children 容器`);
             const localFallbackTracks = collectElementsDeep(processTrack, '.pf-track')
                 .filter((track) => track !== processTrack);
+            const siblingFallbackTracks = collectSiblingChildTracks(processTrack);
 
             const globalFallbackTracks = collectElementsDeep(document, '.pf-track').filter((track) => {
                 if (track === processTrack) return false;
@@ -525,7 +544,16 @@
                 return isLooselyMatched(text, processName);
             });
 
-            const fallbackChildTracks = localFallbackTracks.length > 0 ? localFallbackTracks : globalFallbackTracks;
+            let fallbackChildTracks = [];
+            if (localFallbackTracks.length > 0) {
+                fallbackChildTracks = localFallbackTracks;
+            } else if (siblingFallbackTracks.length > 0) {
+                fallbackChildTracks = siblingFallbackTracks;
+                console.log(`  ℹ️  使用 sibling 回退，发现 ${siblingFallbackTracks.length} 个候选子 track`);
+            } else {
+                fallbackChildTracks = globalFallbackTracks;
+            }
+
             if (fallbackChildTracks.length === 0) return [];
 
             console.log(`  ℹ️  回退查找，共发现 ${fallbackChildTracks.length} 个候选子 track`);
@@ -540,32 +568,26 @@
         return matchThreadTracks(childTracks, threadName, options);
     }
 
-    function findPinButton(trackNode) {
-        if (!trackNode) return null;
+    function findPinControl(trackNode) {
+        if (!trackNode) return { button: null, isPinned: false };
 
-        const iconSelectors = [
-            'i',
-            '.material-icons',
-            '.material-symbols-outlined'
-        ];
+        const trackButtons = collectElementsDeep(trackNode, '.pf-track__buttons')[0] || trackNode;
+        const candidates = collectElementsDeep(trackButtons, 'button');
 
-        const candidates = collectElementsDeep(trackNode, 'button');
         for (const btn of candidates) {
-            const text = (btn.textContent || '').toLowerCase();
-            if (text.includes('push_pin') || text.includes('pin')) {
-                return btn;
-            }
+            const buttonText = ((btn.textContent || '') + ' ' + (btn.title || '') + ' ' + (btn.getAttribute('aria-label') || '')).toLowerCase();
+            const icon = collectElementsDeep(btn, 'i')[0] || collectElementsDeep(btn, '.pf-icon')[0];
+            const iconText = icon ? (icon.textContent || '').toLowerCase() : '';
+            const iconClass = icon ? (icon.className || '').toLowerCase() : '';
 
-            for (const selector of iconSelectors) {
-                const icon = btn.querySelector(selector) || collectElementsDeep(btn, selector)[0];
-                const iconText = icon ? (icon.textContent || '').toLowerCase() : '';
-                if (iconText.includes('push_pin') || iconText.includes('pin')) {
-                    return btn;
-                }
-            }
+            const isPinLike = buttonText.includes('pin') || buttonText.includes('keep') || iconText.includes('push_pin') || iconText.includes('pin');
+            if (!isPinLike) continue;
+
+            const isPinned = buttonText.includes('unpin') || iconClass.includes('pf-filled');
+            return { button: btn, isPinned };
         }
 
-        return null;
+        return { button: null, isPinned: false };
     }
 
     function matchThreadTracks(childTracks, threadName, options = {}) {
@@ -624,7 +646,7 @@
         }
 
         if (matchedTracks.length > 0) {
-            const actionableTracks = matchedTracks.filter(track => !!findPinButton(track));
+            const actionableTracks = matchedTracks.filter(track => !!findPinControl(track).button);
             if (actionableTracks.length > 0) {
                 if (actionableTracks.length !== matchedTracks.length) {
                     console.log(`  ℹ️  已过滤无 pin 按钮的候选 track: ${matchedTracks.length} -> ${actionableTracks.length}`);
@@ -642,11 +664,31 @@
 
     function pinTrack(trackNode) {
         if (!trackNode) return false;
-        const pinButton = findPinButton(trackNode);
-        if (pinButton) {
-            pinButton.click();
+
+        const revealEvents = ['mouseenter', 'mouseover', 'mousemove'];
+        for (const eventName of revealEvents) {
+            trackNode.dispatchEvent(new MouseEvent(eventName, { bubbles: true, cancelable: true, view: window }));
+        }
+
+        const header = collectElementsDeep(trackNode, '.pf-track__header')[0] || trackNode;
+        for (const eventName of revealEvents) {
+            header.dispatchEvent(new MouseEvent(eventName, { bubbles: true, cancelable: true, view: window }));
+        }
+
+        const pinScopes = [trackNode, header];
+        for (const scope of pinScopes) {
+            const pinControl = findPinControl(scope);
+            if (!pinControl.button) continue;
+
+            if (pinControl.isPinned) {
+                console.log('  ℹ️  线程已是 pinned 状态，跳过点击');
+                return true;
+            }
+
+            pinControl.button.click();
             return true;
         }
+
         return false;
     }
 
